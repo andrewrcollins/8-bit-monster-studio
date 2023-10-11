@@ -17,6 +17,8 @@ Make a command
 * Output monster data to console
 * Save monster data to `monster.json`
 
+The command starts from an ancient game save file decoder I wrote years ago.
+
 Make a seeder
 
 * Seed `monsters` table from `monster.json`
