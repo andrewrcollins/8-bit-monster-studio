@@ -13,16 +13,16 @@ class ExtractMonsterData extends Command
      */
     protected $signature = 'extract:monster
                             {file : Game save file filename}
-                            {--format=text : Output data as "text" or "json"}
+                            {--id=all : Output specific ID}
                             {--names : Extract monster names}
                             {--data : Extract monster data}
-                            {--special-attacks : Extract monster special attacks}
+                            {--special-attacks : Extract monster special attack data}
                             {--monsters : Extract monster bitmaps}
                             {--players : Extract player bitmaps}
-                            {--weapons : Extract weapon bitmaps}
-                            {--ranged-weapons : Extract ranged weapon bitmaps}
-                            {--armors : Extract armor bitmaps}
-                            {--shields : Extract shield bitmaps}
+                            {--weapons : Extract weapon data}
+                            {--ranged-weapons : Extract ranged weapon data}
+                            {--armors : Extract armor data}
+                            {--shields : Extract shield data}
                             {--quests : Extract quest object bitmaps}';
 
     /**
@@ -31,6 +31,81 @@ class ExtractMonsterData extends Command
      * @var string
      */
     protected $description = 'Extract monster data from game save file';
+
+    /**
+     * Output bitmap.
+     */
+    private function outputBitmap($bitmap)
+    {
+        for ($y = 0; $y < 16; $y++) {
+            $line = "";
+
+            for ($x = 0; $x < 16; $x++) {
+                if ($bitmap[$x][$y] == 1) {
+                    $line .= "#";
+                } else {
+                    $line .= ".";
+                }
+            }
+
+            $this->info($line);
+        }
+    }
+
+    /**
+     * Convert bitmap to piskel.
+     */
+    private function convertBitmapToPiskel($bitmap, $name, $description)
+    {
+        $im = imagecreatetruecolor(16, 16);
+
+        imagesavealpha($im, true);
+        $transparent = imagecolorallocatealpha($im, 0, 0, 0, 127);
+        imagefill($im, 0, 0, $transparent);
+
+        $black = imagecolorallocate($im, 0, 0, 0);
+
+        for ($x = 0; $x < 16; $x++) {
+            for ($y = 0; $y < 16; $y++) {
+                if ($bitmap[$x][$y] === 1) {
+                    imagesetpixel($im, $x, $y, $black);
+                }
+            }
+        }
+
+        ob_start();
+        imagepng($im);
+        $binary = ob_get_clean();
+
+        $base64 = base64_encode($binary);
+
+        imagedestroy($im);
+
+        // ---
+
+        $layers = [];
+
+        $layer = [];
+        $layer["name"] = $name;
+        $layer["frameCount"] = 1;
+        $layer["base64PNG"] = "data:image/png;base64," . $base64;
+
+        $layers[] = json_encode($layer);
+
+        $piskel = [];
+        $piskel["name"] = $name;
+        $piskel["description"] = $description;
+        $piskel["fps"] = 12;
+        $piskel["width"] = 16;
+        $piskel["height"] = 16;
+        $piskel["layers"] = $layers;
+
+        $top = [];
+        $top["modelVersion"] = 2;
+        $top["piskel"] = $piskel;
+
+        return $top;
+    }
 
     /**
      * Extract monster names from game save file.
@@ -47,7 +122,7 @@ class ExtractMonsterData extends Command
             $name = strtolower($name);
             $name = ucwords($name);
 
-            $bytes = unpack("C*", fread($fp, 10));
+            $bytes = unpack("c*", fread($fp, 10));
 
             $items[] = [$i + 1, $name];
         }
@@ -70,32 +145,45 @@ class ExtractMonsterData extends Command
             $name = strtolower($name);
             $name = ucwords($name);
 
-            $bytes = unpack("C*", fread($fp, 10));
+            $bytes = unpack("c*", fread($fp, 10));
 
-            $value1 = $bytes[1];
-            $value2 = $bytes[2];
-            $value3 = $bytes[3];
-            $value4 = $bytes[4];
-            $value5 = $bytes[5];
-            $value6 = $bytes[6];
-            $value7 = $bytes[7];
-            $value8 = $bytes[8];
-            $value9 = $bytes[9];
-            $value10 = $bytes[10];
+            print_r($bytes);
+
+            $maxHitPoints = 6 * $bytes[1];
+
+            $defense = $bytes[2];
+
+            $attackDamage = abs($bytes[3]);
+            $attackRanged = ($bytes[3] < 0);
+
+            $maxDamage = $bytes[4];
+
+            $specialAttackChance = $bytes[5];
+
+            $specialAttackId = abs($bytes[6]);
+            $specialAttackRanged = ($bytes[6] < 0);
+
+            //$value7 = $bytes[7];
+            //$value8 = $bytes[8];
+
+            //$value9 = $bytes[9];
+            //$value10 = $bytes[10];
 
             $items[] = [
                 $i + 1,
                 $name,
-                $value1,
-                $value2,
-                $value3,
-                $value4,
-                $value5,
-                $value6,
-                $value7,
-                $value8,
-                $value9,
-                $value10,
+                $maxHitPoints,
+                $defense,
+                $attackDamage,
+                $attackRanged,
+                $maxDamage,
+                $specialAttackChance,
+                $specialAttackId,
+                $specialAttackRanged,
+                //$value7,
+                //$value8,
+                //$value9,
+                //$value10,
             ];
         }
 
@@ -130,6 +218,11 @@ class ExtractMonsterData extends Command
      */
     private function getMonsterBitmaps($fp)
     {
+        $items = [];
+
+        $monsters = [];
+        $attacks = [];
+
         fseek($fp, 5466);
 
         for ($i = 0; $i < 32; $i++) {
@@ -177,25 +270,22 @@ class ExtractMonsterData extends Command
                 $y++;
             }
 
-            $monster = (int) ($i / 2);
+            $monster = (int) ($i / 2) + 1;
 
             $attack = ($i % 2) == 1;
 
-            $file = "monster-" . $monster . ($attack ? "-attack" : "") . ".png";
-
-            echo $file . "\n";
-
-            for ($y = 0; $y < 16; $y++) {
-                for ($x = 0; $x < 16; $x++) {
-                    if ($bitmap[$x][$y] == 1) {
-                        echo "#";
-                    } else {
-                        echo ".";
-                    }
-                }
-                echo "\n";
+            if ($attack) {
+                $attacks[] = $bitmap;
+            } else {
+                $monsters[] = $bitmap;
             }
         }
+
+        for ($i = 0; $i < 16; $i++) {
+            $items[] = [$i + 1, $monsters[$i], $attacks[$i]];
+        }
+
+        return $items;
     }
 
     /**
@@ -203,6 +293,11 @@ class ExtractMonsterData extends Command
      */
     private function getPlayerBitmaps($fp)
     {
+        $items = [];
+
+        $players = [];
+        $attacks = [];
+
         fseek($fp, 3656);
 
         for ($i = 0; $i < 8; $i++) {
@@ -250,25 +345,22 @@ class ExtractMonsterData extends Command
                 $y++;
             }
 
-            $player = (int) ($i / 2);
+            $player = (int) ($i / 2) + 1;
 
             $attack = ($i % 2) == 1;
 
-            $file = "player-" . $player . ($attack ? "-attack" : "") . ".png";
-
-            echo $file . "\n";
-
-            for ($y = 0; $y < 16; $y++) {
-                for ($x = 0; $x < 16; $x++) {
-                    if ($bitmap[$x][$y] == 1) {
-                        echo "#";
-                    } else {
-                        echo ".";
-                    }
-                }
-                echo "\n";
+            if ($attack) {
+                $attacks[] = $bitmap;
+            } else {
+                $players[] = $bitmap;
             }
         }
+
+        for ($i = 0; $i < 4; $i++) {
+            $items[] = [$i + 1, $players[$i], $attacks[$i]];
+        }
+
+        return $items;
     }
 
     /**
@@ -325,7 +417,7 @@ class ExtractMonsterData extends Command
             $ammo = strtolower($ammo);
             $ammo = ucwords($ammo);
 
-            $items[] = [$i, $weapon, $damage, $cost, $ammo];
+            $items[] = [$i + 1, $weapon, $damage, $cost, $ammo];
         }
 
         return $items;
@@ -354,10 +446,10 @@ class ExtractMonsterData extends Command
 
             fread($fp, 1);
 
-            $items[] = [$i, $armor, $protection, $cost];
+            $items[] = [$i + 1, $armor, $protection, $cost];
         }
 
-        $this->table(['ID', 'Armor', 'Protection', 'Cost'], $items);
+        return $items;
     }
 
     /**
@@ -383,10 +475,10 @@ class ExtractMonsterData extends Command
 
             fread($fp, 1);
 
-            $items[] = [$i, $shield, $protection, $cost];
+            $items[] = [$i + 1, $shield, $protection, $cost];
         }
 
-        $this->table(['ID', 'Shield', 'Protection', 'Cost'], $items);
+        return $items;
     }
 
     /**
@@ -440,23 +532,6 @@ class ExtractMonsterData extends Command
 
                 $y++;
             }
-
-            $file = "artifact-" . $i . ".png";
-
-            echo $file . "\n";
-
-            for ($y = 0; $y < 16; $y++) {
-                echo " ";
-
-                for ($x = 0; $x < 16; $x++) {
-                    if ($bitmap[$x][$y] == 1) {
-                        echo "#";
-                    } else {
-                        echo ".";
-                    }
-                }
-                echo "\n";
-            }
         }
     }
 
@@ -472,10 +547,24 @@ class ExtractMonsterData extends Command
             return;
         }
 
-        if ($this->option('format') === 'text') {
-            $format = 'text';
+        if ($this->option('id') === 'all') {
+            $all = true;
         } else {
-            $format = 'json';
+            $all = false;
+
+            $id = intval($this->option('id')) - 1;
+
+            if ($id < 0) {
+                $this->error('ID must be 1...N!');
+                return;
+            }
+        }
+
+        if ($this->option('monsters')) {
+            if ($all) {
+                $this->error('Must specify ID in 1...N!');
+                return;
+            }
         }
 
         $fp = fopen($filename, "r");
@@ -483,87 +572,124 @@ class ExtractMonsterData extends Command
         if ($this->option('names')) {
             $items = $this->getMonsterNames($fp);
 
-            if ($format === "text") {
-                $this->table(['ID', 'Name'], $items);
-            } else {
-                $this->info(json_encode($items, JSON_PRETTY_PRINT));
-            }
+            $headers = ['ID', 'Name'];
+
+            $this->table($headers, $items);
         }
 
         if ($this->option('data')) {
+            $headers = [
+                'ID',
+                'Name',
+                'Max Hit Points',
+                'Defense',
+                'Attack Damage',
+                'Is Ranged',
+                'Max Damage',
+                'Special Attack Chance',
+                'Special Attack',
+                'Is Ranged',
+                //'Val7',
+                //'Val8',
+                //'Val9',
+                //'Val10',
+            ];
+
             $items = $this->getMonsterData($fp);
 
-            if ($format === "text") {
-                $headers = [
-                    'ID',
-                    'Name',
-                    'Value1',
-                    'Value2',
-                    'Value3',
-                    'Value4',
-                    'Value5',
-                    'Value6',
-                    'Value7',
-                    'Value8',
-                    'Value9',
-                    'Value10',
-                ];
-
-                $this->table($headers, $items);
-            } else {
-                $this->info(json_encode($items, JSON_PRETTY_PRINT));
-            }
+            $this->table($headers, $items);
         }
 
         if ($this->option('special-attacks')) {
+            $headers = ['ID', 'Special Attack'];
+
             $items = $this->getSpecialAttacks($fp);
 
-            if ($format === "text") {
-                $this->table(['ID', 'Special Attack'], $items);
-            } else {
-                $this->info(json_encode($items, JSON_PRETTY_PRINT));
-            }
+            $this->table($headers, $items);
         }
 
         if ($this->option('monsters')) {
-            $this->getMonsterBitmaps($fp);
+            $items = $this->getMonsterBitmaps($fp);
+
+            if (!isset($items[$id])) {
+                $this->error('ID must be 1...N!');
+                return;
+            }
+
+            $items = $items[$id];
+
+            $id = $items[0];
+            $monster = $items[1];
+            $attack = $items[2];
+
+            // ---
+
+            $this->outputBitmap($monster);
+
+            $output = "monster-" . $id . ".piskel";
+
+            $piskel = $this->convertBitmapToPiskel($monster, "monster-" . $id, "monster-" . $id);
+
+            file_put_contents($output, json_encode($piskel));
+
+            $this->info("Monster bitmap saved in piskel format: " . $output);
+
+            // ---
+
+            $this->outputBitmap($attack);
+
+            $output = "monster-" . $id . "-attack.piskel";
+
+            $piskel = $this->convertBitmapToPiskel($attack, "attack-" . $id, "attack-" . $id);
+
+            file_put_contents($output, json_encode($piskel));
+
+            $this->info("Monster attack bitmap saved in piskel format: " . $output);
         }
 
+        /*
         if ($this->option('players')) {
-            $this->getPlayerBitmaps($fp);
+        $this->getPlayerBitmaps($fp);
         }
+         */
 
         if ($this->option('weapons')) {
+            $headers = ['ID', 'Weapon', 'Damage'];
+
             $items = $this->getWeapons($fp);
 
-            if ($format === "text") {
-                $this->table(['ID', 'Weapon', 'Damage'], $items);
-            } else {
-                $this->info(json_encode($items, JSON_PRETTY_PRINT));
-            }
+            $this->table($headers, $items);
         }
 
         if ($this->option('ranged-weapons')) {
+            $headers = ['ID', 'Weapon', 'Damage', 'Cost', 'Ammo'];
+
             $items = $this->getRangedWeapons($fp);
 
-            if ($format === "text") {
-                $this->table(['ID', 'Weapon', 'Damage', 'Cost', 'Ammo'], $items);
-            } else {
-                $this->info(json_encode($items, JSON_PRETTY_PRINT));
-            }
+            $this->table($headers, $items);
         }
 
         if ($this->option('armors')) {
-            $this->getArmors($fp);
+            $headers = ['ID', 'Armor', 'Protection', 'Cost'];
+
+            $items = $this->getArmors($fp);
+
+            $this->table($headers, $items);
         }
 
         if ($this->option('shields')) {
-            $this->getShields($fp);
+            $headers = ['ID', 'Shield', 'Protection', 'Cost'];
+
+            $items = $this->getShields($fp);
+
+            $this->table($headers, $items);
         }
 
+        /*
         if ($this->option('quests')) {
-            $this->getQuestObjectBitmaps($fp);
+        $this->getQuestObjectBitmaps($fp);
         }
+         */
 
         fclose($fp);
     }

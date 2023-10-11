@@ -1,8 +1,14 @@
 # Tunnels of Doom
 
-A tiny browser for monster data and bitmaps!
+A tiny but powerful editor for monsters.
+
+Used to create 8-bit style graphic elements for games developed with [Phaser](https://phaser.io/).
+
+Inspired by the classic role-playing video game for the TI-99/4A home computer!
 
 <https://en.wikipedia.org/wiki/Tunnels_of_Doom>
+
+---
 
 ## TODO
 
@@ -16,6 +22,9 @@ Make a command
 * Extract monster data from game save file
 * Output monster data to console
 * Save monster data to `monster.json`
+* Export bitmaps in `piskel` format
+
+<https://github.com/rostok/piskel-converter>
 
 The command starts from an ancient game save file decoder I wrote years ago.
 
@@ -27,7 +36,10 @@ Make a view
 
 * View a `Monster`
 
-Embed bitmap editor
+Store bitmaps in `piskel` format
 
 * <https://github.com/piskelapp/piskel>
+
+Embed bitmap editor
+
 * <https://github.com/piskelapp/piskel-embed>
