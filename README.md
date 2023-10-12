@@ -1,4 +1,4 @@
-# Tunnels of Doom
+# 8-Bit Monster Studio
 
 A tiny but powerful editor for monsters.
 
